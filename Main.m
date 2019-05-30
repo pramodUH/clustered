@@ -3,11 +3,27 @@ clc
 % cluster{1} = [1, 2, 5, 6, 9, 10, 11, 12, 13, 14];
 % cluster{2} = [3, 4, 7, 8];
 
+% cluster{1} = [1, 2, 4, 5, 6, 9, 10, 11, 12, 13, 14];
+% mirrored{1} = [];
+% update{1} = [1, 2, 4, 5, 6, 9, 10, 11, 12, 13, 14];
+% cutting{1} = [1, 4, 7, 11];
+% cluster{2} = [2, 3, 4, 7, 8, 9];
+% mirrored{2} = [1, 3, 6];
+% update{2} = [3, 7, 8];
+% cutting{2} = [1, 3, 6];
+
+
 cluster{1} = [1, 5, 6, 10, 11, 12, 13, 14];
+mirrored{1} = [];
+update{1} = [1, 5, 6, 10, 11, 12, 13, 14];
+cutting{1} = [1, 2, 4, 8];
 cluster{2} = [2, 3, 4, 7, 8, 9];
+mirrored{2} = [];
+update{2} = [2, 3, 4, 7, 8, 9];
+cutting{2} = [1, 3, 6];
+
 
 readdata;
-
 
 SBASE = case_identification_data_GO(1);
 for i = 1:1:length(linear_tables_GO)
@@ -15,6 +31,15 @@ for i = 1:1:length(linear_tables_GO)
     table(:,1) = table(:,1)/SBASE;
     linear_tables_GO{i} = table;
 end
+costs =  [1000, 5000, 1000000; 1000, 5000, 1000000; 1000, 5000, 1000000];
+limits = [2 50 Inf; 2 50 Inf; 2 50 Inf]/SBASE;
+
+lambdaPn = costs(1,:) * SBASE;
+lambdaQn = costs(2,:) * SBASE; 
+lambdaen = costs(3,:) * SBASE;  
+
+delta = 0.5;
+
 
 system_info.bus_data_GO = bus_data_GO;
 system_info.load_data_GO = load_data_GO;
@@ -42,7 +67,7 @@ end
 system_info.pLi = pLi;
 system_info.qLi = qLi;
 system_info.no_of_buses = no_of_buses;
-system_info.no_ofgenerators = no_of_generators;
+system_info.no_of_generators = no_of_generators;
 
 
 cluster_info(1) = struct();
@@ -295,14 +320,7 @@ for cl = 1:1:length(cluster_info)
     RATA1 = transformer_data_GO(:,10);
     Rbare = RATEA ./ s_tilde;
     Sbarf = RATA1 ./ s_tilde;
-    costs =  [1000, 5000, 1000000; 1000, 5000, 1000000; 1000, 5000, 1000000];
-    limits = [2 50 Inf; 2 50 Inf; 2 50 Inf]/SBASE;
 
-    lambdaPn = costs(1,:) * SBASE;
-    lambdaQn = costs(2,:) * SBASE; 
-    lambdaen = costs(3,:) * SBASE;  
-
-    delta = 0.5;
 
     %rng(2);
 
@@ -319,14 +337,6 @@ for cl = 1:1:length(cluster_info)
         end
     end
     
-    %----------------CLUSTERING------------------------------------------------
-    %[clusters, bus_to_cluster, branches_list] = createClusters(branch_data_GO, transformer_data_GO);
-    clusters = containers.Map('KeyType','int64','ValueType','any');
-    clusters(1)=[1:no_of_buses];
-    bus_to_cluster = ones(1,no_of_buses);
-    %branches_list = [1:14];
-    %---------------CLUSTERING ENDS HERE---------------------------------------
-
     cluster_info(cl).ge = ge; 
     cluster_info(cl).be = be; 
     cluster_info(cl).thetaf = thetaf; 
@@ -345,8 +355,6 @@ for cl = 1:1:length(cluster_info)
     cluster_info(cl).no_of_buses = no_of_buses; 
     cluster_info(cl).Rbare = Rbare; 
     cluster_info(cl).Sbarf = Sbarf;
-    cluster_info(cl).clusters = clusters;
-    cluster_info(cl).bus_to_cluster = bus_to_cluster;
 end    
 
 prev = [ones(system_info.no_of_buses,1); zeros(system_info.no_of_buses,1)];
@@ -385,7 +393,7 @@ for k = 1:1:outer_iterations
     cg = gbest_val    
 
     for cl = 1:1:length(cluster_info)
-        no_of_dimensions = 2*cluster_info(cl).no_of_buses;
+        no_of_dimensions = 2*(length(cluster{cl}) - length(mirrored{cl}));
         objective_function = @get_csigma;
         no_of_iterations = iterations; 
         no_of_particles = 20;
@@ -394,17 +402,29 @@ for k = 1:1:outer_iterations
         for gen = 1:1:length(partial_pg)
             partial_pg(gen) = pg(cluster_info(cl).generator_mapping(gen));
         end
-        for i = 1:1:length(cluster)
-            partial_prev(i) = prev(cluster{cl}(i));
-            partial_prev(i+length(cluster{cl})) = prev(cluster{cl}(i)+system_info.no_of_buses);
+        total_generation = sum(partial_pg);
+        total_demand = sum(cluster_info(cl).pLi);
+        
+        if(total_generation > total_demand)
+           difference = (total_generation - total_demand)/length(partial_pg);
+           partial_pg = partial_pg - difference;
+        else
+            difference = (total_demand - total_generation)/length(cutting{cl});
+            for j = 1:1:length(cutting{cl})
+                cluster_info(cl).pLi(cutting{cl}(j)) = cluster_info(cl).pLi(cutting{cl}(j)) - difference;
+            end
         end
-        pos_max = [1.05*ones(cluster_info(cl).no_of_buses,1); 0.05*pi*ones(cluster_info(cl).no_of_buses,1)];
-        pos_min = [0.95*ones(cluster_info(cl).no_of_buses,1); -0.05*pi*ones(cluster_info(cl).no_of_buses,1)];
-        [gbest_val, gbest_loc, convergence] = DE2(partial_pg, objective_function, cluster_info(cl).generator_data_GO, cluster_info(cl).branch_data_GO, cluster_info(cl).transformer_data_GO, cluster_info(cl).ge, cluster_info(cl).be, cluster_info(cl).thetaf, cluster_info(cl).bCHe, cluster_info(cl).gf, cluster_info(cl).bf, cluster_info(cl).tauf, cluster_info(cl).gMf, cluster_info(cl).bMf, cluster_info(cl).bus_info, cluster_info(cl).pLi, cluster_info(cl).qLi, cluster_info(cl).gFSi, cluster_info(cl).bFSi, cluster_info(cl).bCSi, cluster_info(cl).no_of_buses, cluster_info(cl).Rbare, cluster_info(cl).Sbarf, lambdaPn, lambdaQn, lambdaen, limits, pos_max, pos_min, SBASE, partial_prev, no_of_dimensions, no_of_iterations, no_of_particles, cluster_info(cl).clusters(1));
+%         for i = 1:1:length(cluster{cl})
+%             partial_prev(i) = prev(cluster{cl}(i));
+%             partial_prev(i+length(cluster{cl})) = prev(cluster{cl}(i)+system_info.no_of_buses);
+%         end
+        pos_max = [1.05*ones(no_of_dimensions/2,1); 0.05*pi*ones(no_of_dimensions/2,1)];
+        pos_min = [0.95*ones(no_of_dimensions/2,1); -0.05*pi*ones(no_of_dimensions/2,1)];
+        [gbest_val, gbest_loc, convergence] = DE2(partial_pg, objective_function, cluster_info(cl).generator_data_GO, cluster_info(cl).branch_data_GO, cluster_info(cl).transformer_data_GO, cluster_info(cl).ge, cluster_info(cl).be, cluster_info(cl).thetaf, cluster_info(cl).bCHe, cluster_info(cl).gf, cluster_info(cl).bf, cluster_info(cl).tauf, cluster_info(cl).gMf, cluster_info(cl).bMf, cluster_info(cl).bus_info, cluster_info(cl).pLi, cluster_info(cl).qLi, cluster_info(cl).gFSi, cluster_info(cl).bFSi, cluster_info(cl).bCSi, cluster_info(cl).no_of_buses, cluster_info(cl).Rbare, cluster_info(cl).Sbarf, lambdaPn, lambdaQn, lambdaen, limits, pos_max, pos_min, SBASE, prev, no_of_dimensions, no_of_iterations, no_of_particles, cluster{cl}, mirrored{cl});
         gbest_val
-        for i = 1:1:length(cluster{cl})
-            prev(cluster{cl}(i)) = gbest_loc(i);
-            prev(cluster{cl}(i) + system_info.no_of_buses) = gbest_loc(i+length(cluster{cl})); 
+        for i = 1:1:length(update{cl})
+            prev(update{cl}(i)) = gbest_loc(i);
+            prev(update{cl}(i) + system_info.no_of_buses) = gbest_loc(i+length(update{cl})); 
         end
     end
     v = prev(1:no_of_buses);

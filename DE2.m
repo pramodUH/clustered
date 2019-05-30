@@ -1,35 +1,32 @@
-function [best_value, best_solution, convergence ] = DE2(pg, objective_function, generator_data_GO, branch_data_GO, transformer_data_GO, ge, be, thetaf, bCHe, gf, bf, tauf, gMf, bMf, bus_info, pLi, qLi, gFSi, bFSi, bCSi, no_of_buses, Rbare, Sbarf, lambdaPn, lambdaQn, lambdaen, limits, init_max, init_min, SBASE, prev, no_of_dimensions, no_of_iterations, population_size, cluster)
+function [best_value, best_solution, convergence] = DE2(pg, objective_function, generator_data_GO, branch_data_GO, transformer_data_GO, ge, be, thetaf, bCHe, gf, bf, tauf, gMf, bMf, bus_info, pLi, qLi, gFSi, bFSi, bCSi, no_of_buses, Rbare, Sbarf, lambdaPn, lambdaQn, lambdaen, limits, init_max, init_min, SBASE, prev, no_of_dimensions, no_of_iterations, population_size, cluster, mirrored)
 
     CR = 0.95;
     move_max = init_max;
     move_min = init_min;
-  %  pgs = repmat(pg, size(pg,1), population_size);
-    
-%      pos_max = [1.1*ones(no_of_buses,1); pi*ones(no_of_buses-1,1)];
-%      pos_min = [0.9*ones(no_of_buses,1); -pi*ones(no_of_buses-1,1)];
-  
+
+    no_of_system_buses = length(prev)/2;
 	temp_buffer = zeros(no_of_dimensions, population_size);
-    population = repmat(prev,1, population_size);
-    for i=2:population_size
-        for j = 1:1:length(cluster)
-            population(cluster(j),i) = rand()*(init_max(cluster(j)) - init_min(cluster(j))) + init_min(cluster(j));
-        end
-        for j=1:1:length(cluster)
-            population(no_of_buses + cluster(j),i)= rand()*(init_max(no_of_buses + cluster(j)) - init_min(no_of_buses + cluster(j))) + init_min(no_of_buses + cluster(j));
-    end
-    population;
-    v = prev(1:no_of_buses);
-    theta = [0; prev(no_of_buses+1:end)];
+    population = rand(no_of_dimensions, population_size) .* repmat((init_max - init_min),1,population_size) + repmat(init_min,1,population_size); 
+    v = zeros(length(cluster),1);
+    theta = zeros(length(cluster),1);    
     fitness = zeros(population_size,1);
+    
     for i = 1:1:population_size
+        point1 = 1;
+        point2 = 1;
         for j = 1:1:length(cluster)
-            v(cluster(j)) = population(cluster(j),i);
-        end
-        for j=1:1:length(cluster)
-            theta(cluster(j)) = population(no_of_buses + cluster(j),i);
+            if(point1<=length(mirrored) && j == mirrored(point1))
+                v(j) = prev(cluster(j));
+                theta(j) = prev(cluster(j) + no_of_system_buses);
+                point1 = point1+1;
+            else
+                v(j) = population(point2,i);
+                theta(j) = population(point2+no_of_dimensions/2,i);
+                point2 = point2+1;
+            end
         end
         qg = get_qg(v, theta, bus_info, qLi, branch_data_GO, transformer_data_GO, generator_data_GO, ge, be, thetaf, bCHe, gf, bf, tauf, gMf, bMf, SBASE);
-        fitness(i) = feval(objective_function, pg, qg, v, theta, branch_data_GO, transformer_data_GO, ge, be, thetaf, bCHe, gf, bf, tauf, gMf, bMf, bus_info, pLi, qLi, gFSi, bFSi, bCSi, no_of_buses, Rbare, Sbarf, lambdaPn, lambdaQn, lambdaen, limits);
+        fitness(i) = feval(objective_function, pg, qg, v, theta, branch_data_GO, transformer_data_GO, ge, be, thetaf, bCHe, gf, bf, tauf, gMf, bMf, bus_info, pLi, qLi, gFSi, bFSi, bCSi, no_of_buses, Rbare, Sbarf, lambdaPn, lambdaQn, lambdaen, limits);            
     end
 	convergence = zeros(no_of_iterations+1,1);
 	convergence(1) = min(fitness);
@@ -137,15 +134,18 @@ function [best_value, best_solution, convergence ] = DE2(pg, objective_function,
 		    end
         end
         
+        point1 = 1;
+        point2 = 1;
         for j = 1:1:length(cluster)
-            v(cluster(j)) = offspring(cluster(j));
-        end
-        for j=1:1:length(cluster)
-            theta(cluster(j)) = offspring(no_of_buses + cluster(j));
+            if(point1<=length(mirrored) && j == mirrored(point1))
+                point1 = point1+1;
+            else
+                v(j) = offspring(point2);
+                theta(j) = offspring(point2+no_of_dimensions/2);
+            end
         end
         qg = get_qg(v, theta, bus_info, qLi, branch_data_GO, transformer_data_GO, generator_data_GO, ge, be, thetaf, bCHe, gf, bf, tauf, gMf, bMf, SBASE);
         result = feval(objective_function, pg, qg, v, theta, branch_data_GO, transformer_data_GO, ge, be, thetaf, bCHe, gf, bf, tauf, gMf, bMf, bus_info, pLi, qLi, gFSi, bFSi, bCSi, no_of_buses, Rbare, Sbarf, lambdaPn, lambdaQn, lambdaen, limits);
-
 		if(result < fitness(i))
 		    fitness(i) = result;
 		    temp_buffer(:,i) = offspring;
